@@ -1,13 +1,16 @@
 {
-  "name": "my-ts-lib",
-  "version": "0.0.0",
-  "description": "My awesome typescript library",
+  "name": "shadcn-uno",
+  "version": "0.0.1",
+  "description": "shadcn-uno is a CLI tool to install shadcn/ui components",
   "publishConfig": {
     "access": "public"
   },
   "files": [
     "dist"
   ],
+  "bin": {
+    "shadcn-uno": "./dist/index.js"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "exports": {
@@ -16,7 +19,7 @@
   },
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build-fast": "tsup src/index.ts --format cjs,esm",
+    "build-fast": "tsdown src/index.ts --format cjs",
     "build": "pnpm run build-fast -- --dts-resolve",
     "test": "vitest run",
     "prepublishOnly": "pnpm run build"
@@ -24,9 +27,17 @@
   "license": "MIT",
   "devDependencies": {
     "@egoist/prettier-config": "1.0.0",
+    "@types/fs-extra": "^11.0.4",
     "prettier": "2.8.4",
-    "tsup": "6.6.3",
+    "tsdown": "^0.6.10",
     "typescript": "4.9.5",
     "vitest": "0.28.5"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.10.1",
+    "es-module-lexer": "^1.6.0",
+    "esbuild": "^0.25.2",
+    "fs-extra": "^11.3.0",
+    "picocolors": "^1.1.1"
   }
 }
