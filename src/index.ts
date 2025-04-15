@@ -124,12 +124,12 @@ main()
 
 async function prepareProject() {
   await generateUnocssConfig()
-  const { componentAlias, utilsAlias, uiAlias } = await generateComponentsJSON()
+  const { components, utils, ui } = await generateComponentsJSON()
 
   return {
-    components: componentAlias.toString(),
-    utils: utilsAlias.toString(),
-    ui: uiAlias.toString(),
+    components: components.toString(),
+    utils: utils.toString(),
+    ui: ui.toString(),
   }
 }
 
@@ -138,43 +138,45 @@ async function generateComponentsJSON() {
 
   if (fs.existsSync(componentsJSONPath)) {
     const content = await fs.readFile(componentsJSONPath, 'utf-8')
-    return JSON.parse(content)
+    return JSON.parse(content).aliases
   }
 
-  const componentAlias = await text({
+  note(`${color.blue("Initialize components.json")}`)
+
+  const components = await text({
     message: 'Enter the alias for the components',
     initialValue: '@/components',
   })
-  cancelCheck(componentAlias)
+  cancelCheck(components)
 
-  const utilsAlias = await text({
+  const utils = await text({
     message: 'Enter the alias for the utils',
     initialValue: '@/lib/utils',
   })
-  cancelCheck(utilsAlias)
+  cancelCheck(utils)
 
-  const uiAlias = await text({
+  const ui = await text({
     message: 'Enter the alias for the ui',
     initialValue: '@/components/ui',
   })
-  cancelCheck(uiAlias)
+  cancelCheck(ui)
 
   const content = `{
   "$schema": "https://ui.shadcn.com/schema.json",
   "style": "new-york",
   "tsx": true,
   "aliases": {
-    "components": ${componentAlias.toString()},
-    "utils": ${utilsAlias.toString()},
-    "ui": ${uiAlias.toString()}
+    "components": "${components.toString()}",
+    "utils": "${utils.toString()}",
+    "ui": "${ui.toString()}"
   }
 }`
 
   await fs.writeFile(componentsJSONPath, content, 'utf-8')
 
   return {
-    componentAlias,
-    utilsAlias,
-    uiAlias,
+    components,
+    utils,
+    ui,
   }
 }
