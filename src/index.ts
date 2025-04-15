@@ -1,9 +1,7 @@
-import config from './constants/components'
 import process from 'node:process'
 import fs from 'fs-extra'
 import color from 'picocolors'
-import { init, parse } from 'es-module-lexer'
-import { transform } from 'esbuild'
+
 
 import {
   intro,
@@ -20,6 +18,7 @@ import { ALL_SHADCN_COMPONENTS } from './constants/shadcn'
 import path from 'node:path'
 import { exec as exec_ } from "node:child_process"
 import { promisify } from "node:util"
+import { checkDeps, generateUnocssConfig, getRadixDeps } from './utils';
 
 const exec = promisify(exec_)
 
@@ -31,13 +30,10 @@ async function runCommand(cmd: string) {
   }
 }
 
+const BASE_PATH = process.cwd()
 const GITHUB_RAW_CONTENT_URL = 'https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/www/registry/new-york/ui'
 const INLINE_LIB_PATH = '@/lib/utils'
 const INLINE_UI_PATH = '@/registry/new-york/ui'
-
-const { aliases } = config
-const { utils, ui } = aliases
-const BASE_PATH = process.cwd()
 
 const cancelCheck = (input: unknown) => {
   if (isCancel(input)) {
@@ -46,20 +42,11 @@ const cancelCheck = (input: unknown) => {
   }
 }
 
-const getRadixDeps = async (data: string) => {
-  const result = await transform(data, {
-    loader: 'tsx',
-    sourcemap: true,
-  })
-
-  await init
-  const [imports] = parse(result.code)
-  return imports.filter((im) => im.n?.startsWith('@radix-ui/')).map((im) => im.n)
-}
-
 async function main() {
   console.log();
   intro(`${color.bgCyan(color.black(" use unocss for shadcn/ui "))}`);
+
+  const { utils, ui } = await prepareProject()
 
   const dirPath = await text({
     message: 'Enter the path to the directory containing the components',
@@ -115,6 +102,16 @@ async function main() {
     const s = spinner()
     s.start("Installing radix-ui dependencies via pnpm")
     await runCommand(`pnpm add ${dependencies.join(' ')}`)
+
+    const { devMissing, missing } = await checkDeps()
+
+    if (devMissing.length > 0) {
+      await runCommand(`pnpm add -D ${devMissing.join(' ')}`)
+    }
+    if (missing.length > 0) {
+      await runCommand(`pnpm add ${missing.join(' ')}`)
+    }
+
     s.stop("Installed")
   } catch (error) {
     console.error(error)
@@ -124,3 +121,60 @@ async function main() {
 }
 
 main()
+
+async function prepareProject() {
+  await generateUnocssConfig()
+  const { componentAlias, utilsAlias, uiAlias } = await generateComponentsJSON()
+
+  return {
+    components: componentAlias.toString(),
+    utils: utilsAlias.toString(),
+    ui: uiAlias.toString(),
+  }
+}
+
+async function generateComponentsJSON() {
+  const componentsJSONPath = path.resolve(BASE_PATH, 'components.json')
+
+  if (fs.existsSync(componentsJSONPath)) {
+    const content = await fs.readFile(componentsJSONPath, 'utf-8')
+    return JSON.parse(content)
+  }
+
+  const componentAlias = await text({
+    message: 'Enter the alias for the components',
+    initialValue: '@/components',
+  })
+  cancelCheck(componentAlias)
+
+  const utilsAlias = await text({
+    message: 'Enter the alias for the utils',
+    initialValue: '@/lib/utils',
+  })
+  cancelCheck(utilsAlias)
+
+  const uiAlias = await text({
+    message: 'Enter the alias for the ui',
+    initialValue: '@/components/ui',
+  })
+  cancelCheck(uiAlias)
+
+  const content = `{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "tsx": true,
+  "aliases": {
+    "components": ${componentAlias.toString()},
+    "utils": ${utilsAlias.toString()},
+    "ui": ${uiAlias.toString()}
+  }
+}`
+
+  await fs.writeFile(componentsJSONPath, content, 'utf-8')
+
+  return {
+    componentAlias,
+    utilsAlias,
+    uiAlias,
+  }
+}
