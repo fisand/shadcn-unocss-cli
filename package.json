@@ -1,6 +1,6 @@
 {
   "name": "shadcn-uno",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "shadcn-uno is a CLI tool to install shadcn/ui components",
   "publishConfig": {
     "access": "public"
