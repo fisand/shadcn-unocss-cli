@@ -42,7 +42,7 @@ export default defineConfig({
 
 
 const DEPS = ['@unocss/reset']
-const DEV_DEPS = ['clsx', 'lucide-react', 'tailwind-merge', '@unocss/preset-wind3', 'unocss-preset-animations', 'unocss-preset-shadcn', 'unocss']
+const DEV_DEPS = ['clsx', 'class-variance-authority', 'lucide-react', 'tailwind-merge', '@unocss/preset-wind3', 'unocss-preset-animations', 'unocss-preset-shadcn', 'unocss']
 
 export async function checkDeps() {
   const pkg = await fs.readJSON(path.resolve(process.cwd(), 'package.json'))

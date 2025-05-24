@@ -1,7 +1,11 @@
 import process from 'node:process'
 import fs from 'fs-extra'
 import color from 'picocolors'
-
+import yargs from 'yargs'
+import { hideBin } from 'yargs/helpers'
+import path from 'node:path'
+import { exec as exec_ } from "node:child_process"
+import { promisify } from "node:util"
 
 import {
   intro,
@@ -13,14 +17,27 @@ import {
   multiselect,
   confirm,
   note,
-} from '@clack/prompts';
+} from '@clack/prompts'
+
 import { ALL_SHADCN_COMPONENTS } from './constants/shadcn'
-import path from 'node:path'
-import { exec as exec_ } from "node:child_process"
-import { promisify } from "node:util"
-import { checkDeps, generateUnocssConfig, getRadixDeps } from './utils';
+import { checkDeps, generateUnocssConfig, getRadixDeps } from './utils'
+import { RemoteComponent } from './models'
+
+// Constants
+const BASE_PATH = process.cwd()
+const GITHUB_RAW_CONTENT_URL = 'https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/www/registry/new-york/ui'
+const INLINE_LIB_PATH = '@/lib/utils'
+const INLINE_UI_PATH = '@/registry/new-york/ui'
 
 const exec = promisify(exec_)
+
+// Utility functions
+const cancelCheck = (input: unknown) => {
+  if (isCancel(input)) {
+    cancel('Operation cancelled')
+    return process.exit(0)
+  }
+}
 
 async function runCommand(cmd: string) {
   try {
@@ -30,118 +47,41 @@ async function runCommand(cmd: string) {
   }
 }
 
-const BASE_PATH = process.cwd()
-const GITHUB_RAW_CONTENT_URL = 'https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/www/registry/new-york/ui'
-const INLINE_LIB_PATH = '@/lib/utils'
-const INLINE_UI_PATH = '@/registry/new-york/ui'
+// Configuration management
+async function loadOrCreateComponentsJSON() {
+  const componentsJSONPath = path.resolve(BASE_PATH, 'components.json')
 
-const cancelCheck = (input: unknown) => {
-  if (isCancel(input)) {
-    cancel('Operation cancelled');
-    return process.exit(0);
+  if (fs.existsSync(componentsJSONPath)) {
+    const content = await fs.readFile(componentsJSONPath, 'utf-8')
+    const aliases = JSON.parse(content).aliases
+
+    // Ensure all required fields exist with fallback values
+    return {
+      components: aliases.components || '@/components',
+      utils: aliases.utils || '@/lib/utils',
+      ui: aliases.ui || '@/components/ui',
+      path: aliases.path || './src/components/ui',
+      useNext: aliases.useNext || false,
+    }
   }
+
+  return await createComponentsJSON(componentsJSONPath)
 }
 
-async function main() {
-  console.log();
-  intro(`${color.bgCyan(color.black(" use unocss for shadcn/ui "))}`);
+async function createComponentsJSON(componentsJSONPath: string) {
+  note(`${color.blue("Initialize components.json")}`)
 
-  const { utils, ui } = await prepareProject()
-
-  const dirPath = await text({
-    message: 'Enter the path to the directory containing the components',
+  const componentsPath = await text({
+    message: 'Enter the path to the components',
     initialValue: './src/components/ui',
   })
-
-  cancelCheck(dirPath)
+  cancelCheck(componentsPath)
 
   const useNext = await confirm({
     message: 'Do you use Next.js?',
     initialValue: false,
   })
-
   cancelCheck(useNext)
-
-  const selectedComponents = await multiselect({
-    message: 'Select the components you want to use',
-    options: ALL_SHADCN_COMPONENTS.map((component) => ({ label: component, value: component })),
-  })
-
-  cancelCheck(selectedComponents)
-
-  const downloadComponents = async (components: string[]) => {
-    const s = spinner()
-    s.start('Downloading components...')
-
-    const radixDeps = []
-    for (const component of components) {
-      const response = await fetch(`${GITHUB_RAW_CONTENT_URL}/${component}.tsx`)
-      const data = await response.text()
-
-
-      try {
-        radixDeps.push(...await getRadixDeps(data))
-
-        const targetDir = path.resolve(BASE_PATH, dirPath.toString())
-        await fs.ensureDir(targetDir)
-        await fs.writeFile(path.resolve(targetDir, `${component}.tsx`), data.replace(INLINE_LIB_PATH, utils).replace(INLINE_UI_PATH, ui).replace(!useNext ? /^\"use client\"\n.*\n/m : '', ''))
-      } catch (error) {
-        console.error(error)
-      }
-    }
-    s.stop('Successfully downloaded components')
-
-    return radixDeps
-  }
-
-  const dependencies = await downloadComponents(selectedComponents as string[])
-
-  note(`${color.blue("Install the following dependencies: ")} \n\n${dependencies.join('\n')}`)
-
-  try {
-    const s = spinner()
-    s.start("Installing radix-ui dependencies via pnpm")
-    await runCommand(`pnpm add ${dependencies.join(' ')}`)
-
-    const { devMissing, missing } = await checkDeps()
-
-    if (devMissing.length > 0) {
-      await runCommand(`pnpm add -D ${devMissing.join(' ')}`)
-    }
-    if (missing.length > 0) {
-      await runCommand(`pnpm add ${missing.join(' ')}`)
-    }
-
-    s.stop("Installed")
-  } catch (error) {
-    console.error(error)
-  }
-
-  outro(`${color.green("Enjoy now!")}`)
-}
-
-main()
-
-async function prepareProject() {
-  await generateUnocssConfig()
-  const { components, utils, ui } = await generateComponentsJSON()
-
-  return {
-    components: components.toString(),
-    utils: utils.toString(),
-    ui: ui.toString(),
-  }
-}
-
-async function generateComponentsJSON() {
-  const componentsJSONPath = path.resolve(BASE_PATH, 'components.json')
-
-  if (fs.existsSync(componentsJSONPath)) {
-    const content = await fs.readFile(componentsJSONPath, 'utf-8')
-    return JSON.parse(content).aliases
-  }
-
-  note(`${color.blue("Initialize components.json")}`)
 
   const components = await text({
     message: 'Enter the alias for the components',
@@ -161,14 +101,25 @@ async function generateComponentsJSON() {
   })
   cancelCheck(ui)
 
+  if (!(await fs.exists(path.resolve(BASE_PATH, './src/lib/utils.ts')))) {
+    await fs.writeFile(path.resolve(BASE_PATH, './src/lib/utils.ts'), `import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}`)
+  }
+
   const content = `{
   "$schema": "https://ui.shadcn.com/schema.json",
   "style": "new-york",
   "tsx": true,
   "aliases": {
+    "path": "${componentsPath.toString()}",
     "components": "${components.toString()}",
     "utils": "${utils.toString()}",
-    "ui": "${ui.toString()}"
+    "ui": "${ui.toString()}",
+    "useNext": ${useNext.toString()}
   }
 }`
 
@@ -178,5 +129,146 @@ async function generateComponentsJSON() {
     components,
     utils,
     ui,
+    path: componentsPath,
+    useNext,
   }
 }
+
+async function prepareProject() {
+  await generateUnocssConfig()
+  return await loadOrCreateComponentsJSON()
+}
+
+// Component processing
+function processComponentContent(content: string, utils: string, ui: string, useNext: boolean) {
+  return content
+    .replace(INLINE_LIB_PATH, utils)
+    .replace(INLINE_UI_PATH, ui)
+    .replace(!Boolean(useNext) ? /^\"use client\"\n.*\n/m : '', '')
+}
+
+async function downloadShadcnComponents(components: string[], dirPath: string, utils: string, ui: string, useNext: boolean) {
+  const s = spinner()
+  s.start('Downloading components...')
+
+  const radixDeps: string[] = []
+
+  for (const component of components) {
+    const response = await fetch(`${GITHUB_RAW_CONTENT_URL}/${component}.tsx`)
+    const data = await response.text()
+
+    try {
+      const deps = await getRadixDeps(data)
+      radixDeps.push(...deps.filter((dep): dep is string => dep !== undefined))
+
+      const targetDir = path.resolve(BASE_PATH, dirPath.toString())
+      await fs.ensureDir(targetDir)
+
+      const processedContent = processComponentContent(data, utils, ui, useNext)
+      await fs.writeFile(path.resolve(targetDir, `${component}.tsx`), processedContent)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  s.stop('Successfully downloaded components')
+  return radixDeps
+}
+
+async function installRemoteComponent(data: RemoteComponent, utils: string, ui: string, useNext: boolean) {
+  for (const file of data.files) {
+    await fs.ensureDir(path.resolve(BASE_PATH, path.dirname(file.path)))
+
+    const processedContent = processComponentContent(file.content, utils, ui, useNext)
+    await fs.writeFile(path.resolve(BASE_PATH, file.path), processedContent)
+  }
+
+  const s = spinner()
+  s.start("Installing dependencies via pnpm")
+  await runCommand(`pnpm add ${data.dependencies.join(' ')}`)
+  s.stop("Completed")
+}
+
+// Dependency management
+async function installDependencies(dependencies: string[]) {
+  note(`${color.blue("Install the following dependencies: ")} \n\n${dependencies.join('\n')}`)
+
+  const s = spinner()
+  s.start("Installing radix-ui dependencies via pnpm")
+  await runCommand(`pnpm add ${dependencies.join(' ')}`)
+
+  const { devMissing, missing } = await checkDeps()
+
+  if (devMissing.length > 0) {
+    await runCommand(`pnpm add -D ${devMissing.join(' ')}`)
+  }
+  if (missing.length > 0) {
+    await runCommand(`pnpm add ${missing.join(' ')}`)
+  }
+
+  s.stop("Installed")
+}
+
+// Main application logic
+async function handleAddCommand(url: string) {
+  const response = await fetch(url)
+  const data = await response.json() as RemoteComponent
+  const { utils, ui, useNext } = await prepareProject()
+
+  try {
+    await installRemoteComponent(data, utils, ui, useNext)
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+async function handleInteractiveMode() {
+  console.log()
+  intro(`${color.bgCyan(color.black(" use unocss for shadcn/ui "))}`)
+
+  const { utils, ui, path: dirPath, useNext } = await prepareProject()
+
+  const selectedComponents = await multiselect({
+    message: 'Select the components you want to use',
+    options: ALL_SHADCN_COMPONENTS.map((component) => ({ label: component, value: component })),
+  })
+  cancelCheck(selectedComponents)
+
+  try {
+    const dependencies = await downloadShadcnComponents(
+      selectedComponents as string[],
+      dirPath,
+      utils,
+      ui,
+      useNext
+    )
+
+    await installDependencies(dependencies)
+  } catch (error) {
+    console.error(error)
+  }
+
+  outro(`${color.green("Enjoy now!")}`)
+}
+
+// CLI setup
+yargs(hideBin(process.argv))
+  .scriptName("shadcn-uno")
+  .usage('$0 <cmd> [args]')
+  .command('add <url>', 'Add remote components', (yargs) => {
+    yargs.positional('url', {
+      type: 'string',
+      describe: 'The name of the url to add'
+    })
+  }, async (argv) => {
+    if (!argv.url) {
+      console.error('Please provide a url')
+      return
+    }
+    await handleAddCommand(argv.url as string)
+  })
+  .command('$0', 'Interactive mode', () => { }, async () => {
+    await handleInteractiveMode()
+  })
+  .help()
+  .parse()
